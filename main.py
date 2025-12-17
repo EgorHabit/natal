@@ -87,17 +87,31 @@ def parse_time(s: str):
 
 
 async def geocode_city(city: str, country: str):
-    # Nominatim: город -> lat/lon
-    q = f"{city}, {country}"
     url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": q, "format": "json", "limit": 1}
     headers = {"User-Agent": "natal-bot/1.0 (contact: example@example.com)"}
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(url, params=params, headers=headers)
-        r.raise_for_status()
-        data = r.json()
-    if not data:
-        return None
+
+    async def _try(q: str):
+        params = {"q": q, "format": "json", "limit": 1}
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(url, params=params, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+        if not data:
+            return None
+        return float(data[0]["lat"]), float(data[0]["lon"])
+
+    # 1) city, country
+    res = await _try(f"{city}, {country}")
+    if res:
+        return res
+
+    # 2) city only
+    res = await _try(city)
+    if res:
+        return res
+
+    return None
+
     return float(data[0]["lat"]), float(data[0]["lon"])
 
 
@@ -291,20 +305,22 @@ async def webhook(req: Request):
         await tg_send_message(chat_id, "Город рождения? (например: Barcelona)")
         return {"ok": True}
 
-    if state == "ASK_CITY":
-        d["city"] = text
-        sess["state"] = "ASK_COUNTRY"
-        await tg_send_message(chat_id, "Страна рождения? (например: Spain)")
-        return {"ok": True}
-
-    if state == "ASK_COUNTRY":
-        d["country"] = text
+   if state == "ASK_CITY":
+    # разрешаем формат "City, Country"
+    parts = [p.strip() for p in text.split(",") if p.strip()]
+    if len(parts) >= 2:
+        d["city"] = parts[0]
+        d["country"] = parts[1]
         sess["state"] = "ASK_TZ"
         await tg_send_message(chat_id,
-            "Часовой пояс в формате IANA.\n"
-            "Пример: Europe/Amsterdam или Europe/Madrid"
+            "Ок. Теперь часовой пояс в формате IANA.\nПример: Europe/Amsterdam или Europe/Madrid"
         )
-        return {"ok": True}
+    else:
+        d["city"] = text
+        sess["state"] = "ASK_COUNTRY"
+        await tg_send_message(chat_id, "Страна рождения? (например: Russia)")
+    return {"ok": True}
+
 
     if state == "ASK_TZ":
         # очень простая проверка
