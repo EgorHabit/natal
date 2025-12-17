@@ -110,9 +110,7 @@ async def geocode_city(city: str, country: str):
     if res:
         return res
 
-    return None
-
-    return float(data[0]["lat"]), float(data[0]["lon"])
+    
 
 
 def compute_chart(lat: float, lon: float, dt_local: datetime, tz_str: str):
@@ -305,32 +303,43 @@ async def webhook(req: Request):
         await tg_send_message(chat_id, "Город рождения? (например: Barcelona)")
         return {"ok": True}
 
-   if state == "ASK_CITY":
-    # разрешаем формат "City, Country"
-    parts = [p.strip() for p in text.split(",") if p.strip()]
-    if len(parts) >= 2:
-        d["city"] = parts[0]
-        d["country"] = parts[1]
+       if state == "ASK_CITY":
+        # принимаем "City", либо "City, Country", либо "City / Country"
+        normalized = text.replace("/", ",")
+        parts = [p.strip() for p in normalized.split(",") if p.strip()]
+
+        if len(parts) >= 2:
+            d["city"] = parts[0]
+            d["country"] = parts[1]
+            sess["state"] = "ASK_TZ"
+            await tg_send_message(chat_id,
+                "Ок. Теперь часовой пояс в формате IANA.\n"
+                "Пример: Europe/Amsterdam или Europe/Madrid"
+            )
+        else:
+            d["city"] = text.strip()
+            sess["state"] = "ASK_COUNTRY"
+            await tg_send_message(chat_id, "Страна рождения? (например: Russia)")
+        return {"ok": True}
+
+    if state == "ASK_COUNTRY":
+        d["country"] = text.strip()
         sess["state"] = "ASK_TZ"
         await tg_send_message(chat_id,
-            "Ок. Теперь часовой пояс в формате IANA.\nПример: Europe/Amsterdam или Europe/Madrid"
+            "Часовой пояс в формате IANA.\n"
+            "Пример: Europe/Amsterdam или Europe/Madrid"
         )
-    else:
-        d["city"] = text
-        sess["state"] = "ASK_COUNTRY"
-        await tg_send_message(chat_id, "Страна рождения? (например: Russia)")
-    return {"ok": True}
-
+        return {"ok": True}
 
     if state == "ASK_TZ":
-        # очень простая проверка
         if "/" not in text or " " in text:
             await tg_send_message(chat_id, "Похоже на неверный формат. Пример: Europe/Amsterdam")
             return {"ok": True}
-        d["tz"] = text
+        d["tz"] = text.strip()
         sess["state"] = "ASK_TOPIC"
         await tg_send_message(chat_id, "Теперь выбери тему 👇", reply_markup=TOPIC_KEYBOARD)
         return {"ok": True}
+
 
     if state == "ASK_FREEFORM":
         if not OPENAI_API_KEY:
